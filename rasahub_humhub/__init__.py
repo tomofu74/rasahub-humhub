@@ -239,9 +239,9 @@ class HumhubConnector(RasahubPlugin):
                 resMsg = resMsg[:-5]
                 if (len(matchingUsers) == 1 and
                    len(matchingUsers[0]["users"]) == 1):
-                    resMsg += u" könnte "
+                    resMsg += u" koennte "
                 else:
-                    resMsg += u" könnten "
+                    resMsg += u" koennten "
                 resMsg += u"bei dem Anliegen helfen."
 
         except ValueError:
