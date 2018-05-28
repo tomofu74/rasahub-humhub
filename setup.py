@@ -4,6 +4,7 @@ install_requires = [
     'rasahub',
     'mysql-connector',
     'nltk',
+    'rasahub-google-calendar',
 ]
 
 tests_requires = [
