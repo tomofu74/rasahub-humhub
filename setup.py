@@ -3,6 +3,7 @@ from setuptools import setup, find_packages
 install_requires = [
     'rasahub',
     'mysql-connector',
+    'nltk',
 ]
 
 tests_requires = [
@@ -15,7 +16,7 @@ extras_requires = {
 }
 
 setup(name='rasahub-humhub',
-      version='0.0.1',
+      version='0.3.0',
       description='Humhub connector for Rasahub',
       url='http://github.com/frommie/rasahub-humhub',
       author='Christian Frommert',
