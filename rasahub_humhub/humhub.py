@@ -4,8 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from datetime import datetime
-from rasa_core.actions.action import Action
-from rasa_core.events import SlotSet, AllSlotsReset
+import rasahub_google_calendar
 from time import gmtime, time, strftime
 import json
 import locale
@@ -19,6 +18,7 @@ import random
 import re
 import yaml
 from nltk.stem.snowball import SnowballStemmer
+import httplib2
 
 stemmer = SnowballStemmer("german")
 logger = logging.getLogger(__name__)
@@ -26,40 +26,205 @@ offlinemode = False
 locale.setlocale(locale.LC_ALL, "de_DE.utf8")
 
 
+class NotAuthenticatedError(Exception):
+    """
+    Class NotAuthenticatedError is thrown everytime a google user is not
+    authenticated properly.
+    """
+    def __init__(self):
+        """
+        Exception initialization, sets error message.
+        """
+        self.msg = "Not Authenticated"
+    def __str__(self):
+        """
+        to-String method
 
+        :return: Error message
+        :rtype: str
+        """
+        return self.msg
 
-def getUsersInConversation(cnx, senderID):
+def connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd):
+    """
+    Establishes connection to the database
+
+    :param dbHost: database host address
+    :type state: str.
+    :param dbName: database name
+    :type state: str.
+    :param dbPort: database host port
+    :type state: int.
+    :param dbUser: database username
+    :type name: str.
+    :param dbPwd: database userpassword
+    :type state: str.
+    :return: Instance of class MySQLConnection
+    :rtype: MySQLConnection
+    """
+    try:
+        cnx = mysql.connector.connect(user=dbUser, port=int(dbPort), password=dbPwd, host=dbHost, database=dbName, autocommit=True)
+    except mysql.connector.Error as err:
+        if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            print("Something is wrong with your user name or password")
+        elif err.errno == errorcode.ER_BAD_DB_ERROR:
+            print("Database does not exist")
+        else:
+            print(err)
+    else:
+        return cnx
+
+def getBotID(cursor):
+    """
+    Gets a suitable Bot User ID from a Humhub User Group called 'Bots'
+
+    :return: Bots Humhub User ID
+    :rtype: int
+    """
+    query = "SELECT `user_id` FROM `group` JOIN `group_user` ON `group`.`id` = `group_user`.`group_id` WHERE `group`.`name` = 'Bots' ORDER BY user_id DESC LIMIT 1;"
+    cursor.execute(query)
+    return cursor.fetchone()[0]
+
+def getNextID(cursor, current_id, bot_id, trigger):
+    """
+    Gets the next message ID from Humhub
+
+    :return: Next message ID to process
+    :rtype: int
+    """
+    query = ("SELECT id FROM message_entry WHERE user_id <> %(bot_id)s AND (content LIKE %(trigger)s OR message_entry.message_id IN "
+        "(SELECT DISTINCT message_entry.message_id FROM message_entry JOIN user_message "
+        "ON message_entry.message_id=user_message.message_id WHERE user_message.user_id = 5 ORDER BY message_entry.message_id)) "
+        "AND id > %(current_id)s ORDER BY id ASC")
+    data = {
+        'bot_id': bot_id,
+        'trigger': trigger + '%', # wildcard for SQL
+        'current_id': current_id,
+    }
+    row_count = cursor.execute(query, data)
+    results = cursor.fetchall()
+    if len(results) > 0: # fetchall returns list of results, each as a tuple
+        return results[0][0]
+    else:
+        return current_id
+
+def getMessage(cursor, msg_id, trigger):
+    """
+    Gets the newest message
+
+    :returns: Containing the message itself as string and the conversation ID
+    :rtype: dict
+    """
+    query = "SELECT message_id, content FROM message_entry WHERE (user_id <> 5 AND id = {})".format(msg_id)
+    cursor.execute(query)
+    result = cursor.fetchone()
+    message_id = result[0]
+    if result[1][:len(trigger)] == trigger:
+        message = result[1][len(trigger):].strip()
+    else:
+        message = result[1].strip()
+    messagedata = {
+        'message': message,
+        'message_id': message_id
+    }
+    return messagedata
+
+def create_new_conversation(cursor, title, message, user_id, bot_id):
+    """
+    Creates new conversation in Humhub.
+
+    :param cursor: MySQL Cursor for database processes
+    :param str title: Title of conversation
+    :param str message: First message of created conversation
+    :param int user_id: Humhub User ID to create conversation with
+    :param int bot_id: User ID to use for the bot
+    """
+    query = "INSERT INTO message (title, created_by, updated_by) VALUES ({}, {}, {})".format(title, bot_id, bot_id)
+    cursor.execute(query)
+    message_id = cursor.lastrowid
+    query = "INSERT INTO user_message (message_id, user_id, created_by, updated_by) VALUES ({}, {}, {}, {})".format(message_id, user_id, bot_id, bot_id)
+    cursor.execute(query)
+    query = "INSERT INTO message_entry (message_id, user_id, content, created_by, updated_by) VALUES ({}, {}, {}, {})".format(message_id, user_id, message, bot_id, bot_id)
+    cursor.execute(query)
+
+def check_google_access(message_id, cursor, bot_id):
+    """
+    Checks google calendar access for humhub user IDs
+
+    :param int message_id: ID of message
+    :param cursor: MySQL Cursor for database processes
+    :param bot_id: Humhub User ID of bot to exclude from calendar
+    """
+    users = getUsersInConversation(cursor, message_id, bot_id)
+    calendars = []
+    return_case = True
+    for userID in users:
+        try:
+            calendar = get_google_calendar_items(userID)
+        except:
+            send_auth(cursor, userID, bot_id)
+            return []
+    return return_case
+
+def getCurrentID(cursor):
+    """
+    Gets the current max message ID from Humhub
+
+    :return: Current max message ID
+    :rtype: int
+    """
+    query = "SELECT MAX(id) FROM message_entry;"
+    cursor.execute(query)
+    return cursor.fetchone()[0]
+
+def send_auth_link(cursor, user_id, bot_id):
+    """
+    Sends Google auth URL to not-authentificated users
+
+    :param cursor: MySQL Cursor for database processes
+    :param user_id: Humhub User ID to send URL to
+    :param bot_id: Humhub User ID of bot to exclude from calendar
+    """
+    title = "Bitte authentifizieren Sie sich"
+    message = "http://localhost:8080/" + str(user_id)
+    create_new_conversation(cursor, title, message, user_id, bot_id)
+
+def getUsersInConversation(cursor, sender_id, bot_id):
     """
     Returns a list of Humhub User IDs participating in the conversation using
     the sender ID
 
-    :param cnx: Mysql Connection
-    :type cnx: MySQLConnection
-    :param senderID: Humhub conversation sender ID
-    :type senderID: int
+    :param cursor: Mysql Cursor
+    :type cusor: mysql.connector.cursor.MySQLCursor
+    :param sender_id: Humhub conversation sender ID
+    :type sender_id: int
+    :param bot_id: Bot Humhub User ID
+    :type bot_id: int
+    :return: List of users in conversation
+    :rtype: list
     """
-    global offlinemode
-    if offlinemode:
-        return [9, 14]
-
-    cursor = cnx.cursor()
     query = ("""SELECT user_id FROM user_message WHERE message_id = {}
-            """).format(senderID)
+            """).format(sender_id)
     cursor.execute(query)
     users = []
     for user_id in cursor:
-        users.append(user_id[0])
+        if user_id != bot_id:
+            users.append(user_id[0])
     return users
 
 
-def getCalendar(user, date, cnx):
+def getCalendar(user_id, date, cursor):
     """
     Gets calendar pattern of a given Humhub User ID
 
-    :param user: Humhub user ID to get the calendar information from
-    :type user: int
+    :param user_id: Humhub user ID to get the calendar information from
+    :type user_id: int
     :param date: Specific date to get the calendar information
     :type date: datetime
+    :param cursor: Mysql Cursor
+    :type cusor: mysql.connector.cursor.MySQLCursor
+    :return: Calendar pattern with set busy dates of user_id
+    :rtype: dict
     """
     # create calendar pattern
     calendarPattern = createCalendarPattern()
@@ -70,25 +235,30 @@ def getCalendar(user, date, cnx):
     startdate = "'" + startdate + "'"
     enddate = "'" + enddate + "'"
 
-    cursor = cnx.cursor()
-    query = ("""SELECT start_datetime, end_datetime FROM calendar_entry
-                INNER JOIN calendar_entry_participant ON
-                calendar_entry.id =
-                calendar_entry_participant.calendar_entry_id
-                WHERE calendar_entry_participant.user_id = {} AND
-                calendar_entry_participant.participation_state = 3 AND
-                calendar_entry.start_datetime BETWEEN {} AND {}
-            """).format(user, startdate, enddate)
-    cursor.execute(query)
-    busydates = []
-    for (start_datetime, end_datetime) in cursor:
-        busydates.append([start_datetime, end_datetime])
-    cnx.close()
+    #query = ("""SELECT start_datetime, end_datetime FROM calendar_entry
+    #            INNER JOIN calendar_entry_participant ON
+    #            calendar_entry.id =
+    #            calendar_entry_participant.calendar_entry_id
+    #            WHERE calendar_entry_participant.user_id = {} AND
+    #            calendar_entry_participant.participation_state = 3 AND
+    #            calendar_entry.start_datetime BETWEEN {} AND {}
+    #        """).format(user_id, startdate, enddate)
+    #cursor.execute(query)
+    try:
+        dates = get_google_calendar_items(user_id)
+    except:
+        # not authenticated
+        bot_id = getBotID(cursor)
+        send_auth_link(cursor, user_id, bot_id)
+        raise NotAuthenticatedError
+    #for (start_datetime, end_datetime) in cursor:
+    #    busydates.append([start_datetime, end_datetime])
+    #cnx.close()
 
-    return setBusyDates(calendarPattern, busydates)
+    return setBusyDates(calendarPattern, dates)
 
 
-def setBusyDates(calendarPattern, cursor):
+def setBusyDates(calendarPattern, dates):
     """
     Sets busy dates in a given calendar pattern using calendar information
 
@@ -96,8 +266,15 @@ def setBusyDates(calendarPattern, cursor):
     :type calendarPattern: array
     :param cursor: Array containing start and end datetimes of busy dates
     :type cursor: array
+    :return: Calendarpattern with set busy dates
+    :rtype: dict
     """
-    for (start_datetime, end_datetime) in cursor:
+    # Google Edition
+    for appointment in dates:
+        start = dates[appointment]['start'] # format: 2018-05-24T17:00:00
+        end = dates[appointment]['end']
+        start_datetime = strptime(start, "%Y-%m-%dT%H:%M:%S")
+        end_datetime = strptime(end, "%Y-%m-%dT%H:%M:%S")
         # convert minute to array index, round down as its starting time
         startIndex = int(float(start_datetime.minute) / 15.)
         # end minute index is round up
@@ -128,6 +305,39 @@ def setBusyDates(calendarPattern, cursor):
                 # set all to 0
                 for j in range(0, 4):
                     calendarPattern[i][j] = 1
+
+    # Humhub Edition
+    #for (start_datetime, end_datetime) in cursor:
+    #    # convert minute to array index, round down as its starting time
+    #    startIndex = int(float(start_datetime.minute) / 15.)
+    #    # end minute index is round up
+    #    endIndex = int(math.ceil(float(end_datetime.minute) / 15.))
+    #    endAtZero = False
+    #    if endIndex == 0:
+    #        endAtZero = True
+    #    else:
+    #        endIndex -= 1  # correct index for all cases except 0
+    #    # set all patterns to 0 between start and end indezes
+    #    for i in range(start_datetime.hour, end_datetime.hour + 1):
+    #        if start_datetime.hour == end_datetime.hour:
+    #            for j in range(startIndex, endIndex + 1):
+    #                calendarPattern[i][j] = 1
+    #            break
+    #        # three cases: i = start.hour, i = end.hour or between
+    #        if i == start_datetime.hour:
+    #            # only set to 0 beginning from startIndex to 3
+    #            for j in range(startIndex, 4):
+    #                calendarPattern[i][j] = 1
+    #        elif i == end_datetime.hour:
+    #            if endAtZero:
+    #                break
+    #            # only set to 0 beginning from 0 to endIndex
+    #            for j in range(endIndex + 1):
+    #                calendarPattern[i][j] = 1
+    #        else:
+    #            # set all to 0
+    #            for j in range(0, 4):
+    #                calendarPattern[i][j] = 1
     return calendarPattern
 
 
@@ -141,6 +351,8 @@ def createCalendarPattern(datefrom=None, dateto=None):
     :type datefrom: datetime
     :param dateto: End datetime for free timeframe
     :type dateto: datetime
+    :return: Blank calendarpattern
+    :rtype: dict
     """
     # matching against standardized calendar
     calendarPattern = []
@@ -188,6 +400,8 @@ def matchCalendars(calendars):
 
     :param calendars: array containing all calendars to match
     :type calendars: array
+    :return: Matched calendarpattern
+    :rtype: dict
     """
     calendarPattern = []
     for i in range(24):
@@ -233,6 +447,8 @@ def getDateSuggestion(calendar,
     :type begiendHournHour: int
     :param endMinuteIndex: Index of ending quarter to be searched (x times 15)
     :type endMinuteIndex: int
+    :return: Hour and Minute of free appointment
+    :rtype: list
     """
     if duration == 0 or duration is None:
         duration = 15
@@ -318,8 +534,15 @@ def suggestDate(
         calendarPattern = createCalendarPattern()
         # get users calendars
         calendars = []
+        auth = True
         for user in users:
-            calendars.append(getCalendar(user, dtfrom, cnx))
+            try:
+                calendar = getCalendar(user, dtfrom, cnx)
+                calendars.append(calendar)
+            except:
+                auth = False
+        if auth == False:
+            raise NotAuthenticatedError
         # get free date
         calendars.append(calendarPattern)
         datesuggest = None
@@ -352,6 +575,8 @@ def getEndTime(datetime, duration):
     :type datetime: datetime
     :param duration: Duration in minutes
     :type duration: int
+    :return: End datetime
+    :rtype: datetime
     """
     # round duration minutes to next 15
     duration = int(math.ceil(float(duration) / 15.)) * 15
@@ -367,7 +592,10 @@ def getEndTime(datetime, duration):
 
 def getUserName(userID):
     """
-    Gets users firstname and lastname and returns as string
+    Gets users firstname and lastname by user_id and returns as string
+
+    :return: Full username
+    :rtype: str
     """
     firstname = ''
     lastname = ''
@@ -388,6 +616,9 @@ def getUserName(userID):
 
 
 def bookdate(cnx, datefrom, duration, users):
+    """
+    Books appointment in Humhub database
+    """
     # create calendar entry, duration in minutes
     cursor = cnx.cursor()
     datetimeNow = "'" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "'"

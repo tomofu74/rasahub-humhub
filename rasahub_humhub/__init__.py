@@ -33,11 +33,19 @@ class HumhubConnector(RasahubPlugin):
         dbPwd = kwargs.get('dbpasswd', '')
         trigger = kwargs.get('trigger', '!bot')
 
-        self.cnx = self.connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
-        self.cursor = self.cnx.cursor()
-        self.current_id = self.getCurrentID()
+        self.cnx_in = connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
+        self.cursor_in = self.cnx_in.cursor()
+
+        self.cnx_out = connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
+        self.cursor_out = self.cnx_out.cursor()
+
+        self.cnx_processing = connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
+        self.cursor_processing = self.cnx_processing.cursor()
+
         self.trigger = trigger
-        self.bot_id = self.getBotID()
+        self.current_id = getCurrentID(self.cursor_in)
+        self.bot_id = getBotID(self.cursor_in)
+
 
     def send(self, messagedata, main_queue):
         """
@@ -54,8 +62,8 @@ class HumhubConnector(RasahubPlugin):
           'message': messagedata.message,
         }
         try:
-            self.cursor.execute(query, data)
-            self.cnx.commit()
+            self.cursor_out.execute(query, data)
+            self.cnx_out.commit()
         except mysql.connector.Error as err:
             if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
                 print("Something is wrong with your user name or password")
@@ -70,22 +78,22 @@ class HumhubConnector(RasahubPlugin):
 
         :returns: dictionary - Received message with conversation ID
         """
-        new_id = self.getNextID()
+        new_id = getNextID(self.cursor_in, self.current_id, self.bot_id, self.trigger)
         if (self.current_id != new_id): # new messages
             self.current_id = new_id
-            inputmsg = self.getMessage(new_id)
+            inputmsg = getMessage(self.cursor_in, new_id, self.trigger)
             return inputmsg
 
-    def process_command(self, command, payload):
+    def process_command(self, command, payload, out_message):
         """
         Returns message object
         """
         if command == "search_appointment":
-            reply = self.search_appointment(payload)
+            reply = self.search_appointment(payload, self.cursor_processing)
         elif command == "book_appointment":
-            reply = self.book_appointment(payload)
+            reply = self.book_appointment(payload, self.cursor_processing)
         elif command == "search_competence":
-            reply = self.get_competence(payload)
+            reply = self.get_competence(payload, self.cursor_processing)
         else:
             reply = RasahubMessage(
                 message = "Command unknown",
@@ -95,97 +103,10 @@ class HumhubConnector(RasahubPlugin):
             )
         return reply
 
-    def connectToDB(self, dbHost, dbName, dbPort, dbUser, dbPwd):
+    def search_appointment(self, payload, cursor):
         """
-        Establishes connection to the database
-
-        :param dbHost: database host address
-        :type state: str.
-        :param dbName: database name
-        :type state: str.
-        :param dbPort: database host port
-        :type state: int.
-        :param dbUser: database username
-        :type name: str.
-        :param dbPwd: database userpassword
-        :type state: str.
-        :returns: MySQLConnection -- Instance of class MySQLConnection
+        Search for and reply a free appointment
         """
-        try:
-            cnx = mysql.connector.connect(user=dbUser, port=int(dbPort), password=dbPwd, host=dbHost, database=dbName, autocommit=True)
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-            else:
-                print(err)
-        else:
-            return cnx
-
-    def getCurrentID(self):
-        """
-        Gets the current max message ID from Humhub
-
-        :returns: int -- Current max message ID
-        """
-        query = "SELECT MAX(id) FROM message_entry;"
-        self.cursor.execute(query)
-        return self.cursor.fetchone()[0]
-
-    def getBotID(self):
-        """
-        Gets a suitable Bot User ID from a Humhub User Group called 'Bots'
-
-        :returns: int -- Bots Humhub User ID
-        """
-        query = "SELECT `user_id` FROM `group` JOIN `group_user` ON `group`.`id` = `group_user`.`group_id` WHERE `group`.`name` = 'Bots' ORDER BY user_id DESC LIMIT 1;"
-        self.cursor.execute(query)
-        return self.cursor.fetchone()[0]
-
-    def getNextID(self):
-        """
-        Gets the next message ID from Humhub
-
-        :returns: int -- Next message ID to process
-        """
-        query = ("SELECT id FROM message_entry WHERE user_id <> %(bot_id)s AND (content LIKE %(trigger)s OR message_entry.message_id IN "
-            "(SELECT DISTINCT message_entry.message_id FROM message_entry JOIN user_message "
-            "ON message_entry.message_id=user_message.message_id WHERE user_message.user_id = 5 ORDER BY message_entry.message_id)) "
-            "AND id > %(current_id)s ORDER BY id ASC")
-        data = {
-            'bot_id': self.bot_id,
-            'trigger': self.trigger + '%', # wildcard for SQL
-            'current_id': self.current_id,
-        }
-        self.cursor.execute(query, data)
-        results = self.cursor.fetchall()
-        if len(results) > 0: # fetchall returns list of results, each as a tuple
-            return results[0][0]
-        else:
-            return self.current_id
-
-    def getMessage(self, msg_id):
-        """
-        Gets the newest message
-
-        :returns: dictionary -- Containing the message itself as string and the conversation ID
-        """
-        query = "SELECT message_id, content FROM message_entry WHERE (user_id <> 5 AND id = {})".format(msg_id)
-        self.cursor.execute(query)
-        result = self.cursor.fetchone()
-        message_id = result[0]
-        if result[1][:len(self.trigger)] == self.trigger:
-            message = result[1][len(self.trigger):].strip()
-        else:
-            message = result[1].strip()
-        messagedata = {
-            'message': message,
-            'message_id': message_id
-        }
-        return messagedata
-
-    def search_appointment(payload):
         # if day is set:
         # search available dates for that day
         #
@@ -205,42 +126,67 @@ class HumhubConnector(RasahubPlugin):
                 beginMinuteIndex = int(
                     math.ceil(float(datetime.now().minute) / 15.))
 
-        suggestedDate = suggestDate(
-            payload['args']['datefrom'],
-            payload['args']['dateto'],
-            payload['args']['duration'],
-            payload['args']['users'],
-            payload['args']['timesSearched'],
-            beginHour,
-            beginMinuteIndex,
-            endHour,
-            endHourIndex,
-            self.cnx
-        )
+        try:
+            suggestedDate = suggestDate(
+                payload['args']['datefrom'],
+                payload['args']['dateto'],
+                payload['args']['duration'],
+                payload['args']['users'],
+                payload['args']['timesSearched'],
+                beginHour,
+                beginMinuteIndex,
+                endHour,
+                endHourIndex,
+                cursor
+            )
 
-        reply = {}
-        if (suggestedDate is not None and
-            suggestedDate[0] is not None and
-            suggestedDate[1] is not None):
-            suggestedDate = searchDateFrom.replace(
-                hour=suggestedDate[0], minute=suggestedDate[1])
-            # get end time
-            suggestedDateTo = getEndTime(suggestedDate, duration)
-            reply = {'suggestedDate': suggestedDate, 'suggestedDateTo': suggestedDateTo}
+            reply = {}
 
-        # send result back to source (rasa)
-        replymessage = RasahubMessage(
-            message = json.dumps(reply),
-            message_id = payload['message_id'],
-            target = payload['message_source'],
-            source = payload['message_target']
-        )
-        return replymessage
+            ## send result back to source (rasa)
+            #replymessage = RasahubMessage(
+            #    message = "SUGGESTDATE" + json.dumps(reply),
+            #    message_id = payload['message_id'],
+            #    target = payload['message_source'],
+            #    source = payload['message_target']
+            #)
+            msg = ""
+            if (suggestedDate is not None and
+                suggestedDate[0] is not None and
+                suggestedDate[1] is not None):
+                suggestedDate = searchDateFrom.replace(
+                    hour=suggestedDate[0], minute=suggestedDate[1])
+                # get end time
+                suggestedDateTo = getEndTime(suggestedDate, payload['args']['duration'])
+                msg = "Am {} gibt es zwischen {} und {} Uhr einen freien Termin."
+                msg = msg.format(
+                    suggestedDate.strftime("%A, den %d.%m.%Y"),
+                    suggestedDate.strftime("%H:%M"),
+                    suggestedDateTo.strftime("%H:%M")
+                )
+            else:
+                msg = "Keinen freien Termin gefunden."
 
-    #def book_appointment(payload):
+            replymessage = RasahubMessage(
+                message = msg,
+                message_id = payload['message_id'],
+                target = payload['message_target'],
+                source = payload['message_source']
+            )
+            return replymessage
+        except:
+            return None # auth exception, no message to process anymore
+
+    def book_appointment(self, payload, cursor):
+        """
+        Books a appointment in Users Google calendars
+        """
         #message_id = payload['message_id']
+        raise NotImplementedError
 
-    def get_competence(payload):
+    def get_competence(self, payload, cursor):
+        """
+        Returns user with searched competence
+        """
         with open('competences.json') as data_file:
             data = json.load(data_file)
         try:
@@ -262,9 +208,8 @@ class HumhubConnector(RasahubPlugin):
             else:
                 categories.append(searchCompetence(search, data))
 
-            exceptUserIDs = getUsersInConversation(self.cnx, payload['message_id'])
-            usercompetencies = getUserCompetencies(
-                self.cnx, exceptUserIDs)
+            exceptUserIDs = getUsersInConversation(cursor, payload['message_id'], self.bot_id)
+            usercompetencies = getUserCompetencies(cursor, exceptUserIDs)
 
             # get users matching competences
             matchingUsers = []
@@ -302,9 +247,12 @@ class HumhubConnector(RasahubPlugin):
         except ValueError:
             resMsg = "Keinen Ansprechpartner gefunden."
         dispatcher.utter_message(resMsg)
-        if offlinemode is False:
-            cnx.close()
         return []
 
     def end(self):
-        self.cnx.close()
+        """
+        Closed mysql connections
+        """
+        self.cnx_in.close()
+        self.cnx_out.close()
+        self.cnx_processing.close()
