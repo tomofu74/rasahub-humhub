@@ -145,7 +145,6 @@ class RasaHumhubTest(unittest.TestCase):
         self.messagehandler = RasahubHandler()
 
         self.humhub = HumhubConnector(**db_args)
-        import pdb; pdb.set_trace()
         self.test = RasaTestPlugin()
 
         self.humhub.add_target('test')
