@@ -9,37 +9,38 @@ class HumhubConnector(RasahubPlugin):
     """
     HumhubConnector is subclass of RasahubPlugin
     """
-    def __init__(self, **kwargs):
+    def __init__(self,
+                 host = '127.0.0.1',
+                 dbname = 'humhub',
+                 port = 3306,
+                 dbuser = 'user',
+                 dbpasswd = '',
+                 trigger = '!bot'):
         """
         Initializes database connection
 
-        :param dbHost: database host address
+        :param host: database host address
         :type state: str.
-        :param dbName: database name
+        :param dbname: database name
         :type state: str.
-        :param dbPort: database host port
+        :param dbuser: database host port
         :type state: int.
-        :param dbUser: database username
+        :param dbuser: database username
         :type name: str.
-        :param dbPwd: database userpassword
+        :param dbpasswd: database userpassword
+        :type state: str.
+        :param trigger: trigger string for bot
         :type state: str.
         """
         super(HumhubConnector, self).__init__()
 
-        dbHost = kwargs.get('host', '127.0.0.1')
-        dbName = kwargs.get('dbname', 'humhub')
-        dbPort = kwargs.get('port', '3306')
-        dbUser = kwargs.get('dbuser', 'user')
-        dbPwd = kwargs.get('dbpasswd', '')
-        trigger = kwargs.get('trigger', '!bot')
-
-        self.cnx_in = connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
+        self.cnx_in = connectToDB(host, dbname, port, dbuser, dbpasswd)
         self.cursor_in = self.cnx_in.cursor()
 
-        self.cnx_out = connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
+        self.cnx_out = connectToDB(host, dbname, port, dbuser, dbpasswd)
         self.cursor_out = self.cnx_out.cursor()
 
-        self.cnx_processing = connectToDB(dbHost, dbName, dbPort, dbUser, dbPwd)
+        self.cnx_processing = connectToDB(host, dbname, port, dbuser, dbpasswd)
         self.cursor_processing = self.cnx_processing.cursor()
 
         self.trigger = trigger
