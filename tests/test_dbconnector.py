@@ -200,7 +200,7 @@ class RasaHumhubTest(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        self.assertEqual(result, (1, u'Bots Answer'))
+        self.assertEqual(result, (9, u'Bots Answer'))
 
 if __name__ == '__main__':
     unittest.main()
