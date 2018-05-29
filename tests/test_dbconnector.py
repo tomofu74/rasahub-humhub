@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
+import time
 import testing.mysqld
 
 from rasahub.messagehandler import RasahubHandler
