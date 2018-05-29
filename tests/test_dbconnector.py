@@ -134,7 +134,7 @@ args = {
     'trigger': '!bot'
 }
 
-def tearDown(self):
+def tearDown():
     mysqld.stop()
     Mysqld.clear_cache()
 
@@ -175,15 +175,15 @@ class RasaHumhubTest(unittest.TestCase):
         cursor.close()
         conn.commit()
         conn.close()
-        self.assertEqual(getNextID(self.humhub.cursor_in, self.humhub.current_id, self.humhub.bot_id, self.humhub.trigger), 8)
+        self.assertEqual(self.humhub.current_id, 8)
 
     def test_getNewDBMessage(self):
-        self.assertEqual(getMessage(self.humhub.cursor_in, 8, self.humhub.trigger), {'message': 'Test', 'message_id': 1})
+        self.assertEqual(self.test.message_out.message, 'Test')
 
     def test_saveToDB(self):
         global mysqld
 
-        self.humhub.send({'reply': 'Bots Answer', 'message_id': 1}, self.messagehandler.mainqueue)
+        self.humhub.send({'message': 'Bots Answer', 'message_id': 1}, self.messagehandler.mainqueue)
 
         conn = mysql.connector.connect(**mysqld.dsn())
         cursor = conn.cursor()
@@ -196,7 +196,12 @@ class RasaHumhubTest(unittest.TestCase):
         self.assertEqual(result, (9, u'Bots Answer'))
 
     def tearDown(self):
+        global mysqld
+        global Mysqld
         self.messagehandler.end_processes()
+
+        mysqld.stop()
+        Mysqld.clear_cache()
 
 if __name__ == '__main__':
     unittest.main()
