@@ -121,53 +121,58 @@ def handler(mysqld):
     conn.commit()
     conn.close()
 
-Mysqld = testing.mysqld.MysqldFactory(cache_initialized_db=True,
-                                      on_initialized=handler)
-
-mysqld = Mysqld()
-db_args = {
-    'host': mysqld.dsn()['host'],
-    'port': mysqld.dsn()['port'],
-    'dbname': mysqld.dsn()['db'],
-    'dbuser': mysqld.dsn()['user'],
-    'dbpasswd': '',
-    'trigger': '!bot'
-}
-
-def tearDown():
-    mysqld.stop()
-    Mysqld.clear_cache()
-
 
 class RasaHumhubTest(unittest.TestCase):
-    def setUp(self):
-        global db_args
-        self.messagehandler = RasahubHandler()
+    @classmethod
+    def setUpClass(cls):
+        """
+        """
+        super(RasaHumhubTest, cls).setUpClass()
 
-        self.humhub = HumhubConnector(**db_args)
-        self.test = RasaTestPlugin()
+        cls.Mysqld = testing.mysqld.MysqldFactory(cache_initialized_db=True,
+                                              on_initialized=handler)
 
-        self.humhub.add_target('test')
-        self.test.add_target('humhub')
+        cls.mysqld = cls.Mysqld()
+        cls.db_args = {
+            'host': cls.mysqld.dsn()['host'],
+            'port': cls.mysqld.dsn()['port'],
+            'dbname': cls.mysqld.dsn()['db'],
+            'dbuser': cls.mysqld.dsn()['user'],
+            'dbpasswd': '',
+            'trigger': '!bot'
+        }
 
-        self.messagehandler.add_plugin('humhub', 'interface', self.humhub)
-        self.messagehandler.add_plugin('test', 'interface', self.test)
+        cls.messagehandler = RasahubHandler()
 
-        self.messagehandler.start()
+        cls.humhub = HumhubConnector(**cls.db_args)
+        cls.test = RasaTestPlugin()
+
+        cls.humhub.add_target('test')
+        cls.test.add_target('humhub')
+
+        cls.messagehandler.add_plugin('humhub', 'interface', cls.humhub)
+        cls.messagehandler.add_plugin('test', 'interface', cls.test)
+
+        cls.messagehandler.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.messagehandler.end_processes()
+        cls.mysqld.stop()
+        cls.Mysqld.clear_cache()
+
 
     def test_connection(self):
-        self.assertIsNotNone(self.humhub.cnx_in)
+        self.assertIsNotNone(self.__class__.humhub.cnx_in)
 
     def test_userID(self):
-        self.assertEqual(self.humhub.bot_id, 5)
+        self.assertEqual(self.__class__.humhub.bot_id, 5)
 
     def test_checkLatestMessageID(self):
-        self.assertEqual(self.humhub.current_id, 7)
+        self.assertEqual(self.__class__.humhub.current_id, 7)
 
     def test_checkNewDBMessage(self):
-        global mysqld
-
-        conn = mysql.connector.connect(**mysqld.dsn())
+        conn = mysql.connector.connect(**self.__class__.mysqld.dsn())
         cursor = conn.cursor()
         cursor.execute("INSERT INTO `message_entry` "
             "(`message_id`, `user_id`, `content`, `created_at`, `created_by`, `updated_at`, `updated_by`) VALUES"
@@ -175,17 +180,17 @@ class RasaHumhubTest(unittest.TestCase):
         cursor.close()
         conn.commit()
         conn.close()
-        self.assertEqual(self.humhub.current_id, 8)
+        self.assertEqual(self.__class__.humhub.current_id, 8)
 
     def test_getNewDBMessage(self):
-        self.assertEqual(self.test.message_out.message, 'Test')
+        self.assertEqual(self.__class__.test.message_out.message, 'Test')
 
     def test_saveToDB(self):
         global mysqld
 
-        self.humhub.send({'message': 'Bots Answer', 'message_id': 1}, self.messagehandler.mainqueue)
+        self.__class__.humhub.send({'message': 'Bots Answer', 'message_id': 1}, self.__class__.messagehandler.mainqueue)
 
-        conn = mysql.connector.connect(**mysqld.dsn())
+        conn = mysql.connector.connect(**self.__class__.mysqld.dsn())
         cursor = conn.cursor()
         cursor.execute("SELECT id, content FROM `message_entry` ORDER BY ID DESC LIMIT 1")
         result = cursor.fetchone()
@@ -194,14 +199,6 @@ class RasaHumhubTest(unittest.TestCase):
         conn.close()
 
         self.assertEqual(result, (9, u'Bots Answer'))
-
-    def tearDown(self):
-        global mysqld
-        global Mysqld
-        self.messagehandler.end_processes()
-
-        mysqld.stop()
-        Mysqld.clear_cache()
 
 if __name__ == '__main__':
     unittest.main()
