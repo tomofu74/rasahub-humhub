@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
-import time
+from time import time, sleep
 import testing.mysqld
 
 from rasahub.messagehandler import RasahubHandler
@@ -190,7 +190,7 @@ class RasaHumhubTest(unittest.TestCase):
         global mysqld
 
         self.__class__.test.set_message('Bots Answer')
-        time.sleep(3)
+        sleep(3)
 
         conn = mysql.connector.connect(**self.__class__.mysqld.dsn())
         cursor = conn.cursor()
