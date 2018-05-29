@@ -125,7 +125,7 @@ Mysqld = testing.mysqld.MysqldFactory(cache_initialized_db=True,
                                       on_initialized=handler)
 
 mysqld = Mysqld()
-args = {
+db_args = {
     'host': mysqld.dsn()['host'],
     'port': mysqld.dsn()['port'],
     'dbname': mysqld.dsn()['db'],
@@ -144,7 +144,8 @@ class RasaHumhubTest(unittest.TestCase):
         global args
         self.messagehandler = RasahubHandler()
 
-        self.humhub = HumhubConnector(**args)
+        self.humhub = HumhubConnector(**db_args)
+        import pdb; pdb.set_trace()
         self.test = RasaTestPlugin()
 
         self.humhub.add_target('test')
