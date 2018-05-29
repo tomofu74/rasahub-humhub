@@ -17,7 +17,7 @@ extras_requires = {
 }
 
 setup(name='rasahub-humhub',
-      version='0.3.0',
+      version='0.3.1',
       description='Humhub connector for Rasahub',
       url='http://github.com/frommie/rasahub-humhub',
       author='Christian Frommert',
