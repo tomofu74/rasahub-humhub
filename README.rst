@@ -2,6 +2,9 @@
 Rasahub-Humhub
 ==============
 
+.. image:: https://travis-ci.org/frommie/rasahub-humhub.svg?branch=master
+    :target: https://travis-ci.org/frommie/rasahub-humhub
+
 Rasahub-Humhubs implements a connector between Rasahub and `Humhub`_ `Mail`_ .
 
 ----
