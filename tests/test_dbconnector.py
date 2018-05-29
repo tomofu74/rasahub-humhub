@@ -188,7 +188,8 @@ class RasaHumhubTest(unittest.TestCase):
     def test_saveToDB(self):
         global mysqld
 
-        self.__class__.humhub.send({'message': 'Bots Answer', 'message_id': 1}, self.__class__.messagehandler.mainqueue)
+        self.__class__.test.set_message('Bots Answer')
+        time.sleep(3)
 
         conn = mysql.connector.connect(**self.__class__.mysqld.dsn())
         cursor = conn.cursor()
@@ -198,7 +199,7 @@ class RasaHumhubTest(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        self.assertEqual(result, (9, u'Bots Answer'))
+        self.assertEqual(result, (1, u'Bots Answer'))
 
 if __name__ == '__main__':
     unittest.main()
