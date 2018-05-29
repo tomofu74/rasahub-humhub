@@ -181,6 +181,7 @@ class RasaHumhubTest(unittest.TestCase):
         cursor.close()
         conn.commit()
         conn.close()
+        sleep(3)
         self.assertEqual(self.__class__.humhub.current_id, 8)
 
     def test_getNewDBMessage(self):
