@@ -41,12 +41,14 @@ Create file config.yml in working path. Example:
 .. code-block:: yaml
 
   humhub:
-    host: '127.0.0.1'
-    port: 3306
-    dbname: 'humhub'
-    dbuser: 'humhubuser'
-    dbpasswd: 'humhub123'
-    trigger: '!bot'
+    package: 'rasahub_humhub'
+    init:
+      host: '127.0.0.1'
+      port: 3306
+      dbname: 'humhub'
+      dbuser: 'humhubuser'
+      dbpasswd: 'humhub123'
+      trigger: '!bot'
 
 
 Command-Line API
