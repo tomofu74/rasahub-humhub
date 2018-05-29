@@ -5,7 +5,7 @@ Rasahub-Humhub
 .. image:: https://travis-ci.org/frommie/rasahub-humhub.svg?branch=master
     :target: https://travis-ci.org/frommie/rasahub-humhub
 
-Rasahub-Humhubs implements a connector between Rasahub and `Humhub`_ `Mail`_ .
+Rasahub-Humhub implements a connector between `Rasahub`_ and `Humhub`_ `Mail`_ .
 
 ----
 
@@ -80,6 +80,7 @@ Run Test:
 * License: MIT
 * `PyPi`_ - package installation
 
+.. _Rasahub: https://github.com/DServSys/rasahub
 .. _Humhub: https://www.humhub.org/de/site/index
 .. _Mail: https://github.com/humhub/humhub-modules-mail
 .. _PyPi: https://pypi.python.org/pypi/rasahub
