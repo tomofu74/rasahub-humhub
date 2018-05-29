@@ -141,7 +141,7 @@ def tearDown():
 
 class RasaHumhubTest(unittest.TestCase):
     def setUp(self):
-        global args
+        global db_args
         self.messagehandler = RasahubHandler()
 
         self.humhub = HumhubConnector(**db_args)
