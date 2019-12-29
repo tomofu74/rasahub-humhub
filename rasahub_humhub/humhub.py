@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from datetime import datetime
-import rasahub_google_calendar
+# import rasahub_google_calendar
 from time import gmtime, time, strftime
 import json
 import locale
